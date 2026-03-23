@@ -21,7 +21,6 @@ import {
   View,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AbilityButton } from '../components/AbilityButton';
 import { GameHUD } from '../components/GameHUD';
@@ -205,8 +204,8 @@ export default function SurvivalGameScreen({ navigation }: Props) {
   const [leftStick, setLeftStick] = useState<JoystickState>(createIdleJoystickState());
   const [rightStick, setRightStick] = useState<JoystickState>(createIdleJoystickState());
   const [exitDialogVisible, setExitDialogVisible] = useState(false);
-
-  const tick = useSharedValue(0);
+  const leftStickRef = useRef(leftStick);
+  const rightStickRef = useRef(rightStick);
 
   useEffect(() => {
     const localPlayerId = 'local-player';
@@ -241,6 +240,14 @@ export default function SurvivalGameScreen({ navigation }: Props) {
     setRightStick(state);
   }, []);
 
+  useEffect(() => {
+    leftStickRef.current = leftStick;
+  }, [leftStick]);
+
+  useEffect(() => {
+    rightStickRef.current = rightStick;
+  }, [rightStick]);
+
   const handleAbility = useCallback(() => {
     const localPlayer = engineRef.current?.getLocalPlayer();
     if (!engineRef.current || !localPlayer) return;
@@ -252,47 +259,52 @@ export default function SurvivalGameScreen({ navigation }: Props) {
     navigation.navigate('ModeSelect');
   }, [navigation]);
 
-  useFrameCallback(() => {
-    if (!engineRef.current) return;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!engineRef.current) return;
 
-    const localPlayer = engineRef.current.getLocalPlayer();
-    if (localPlayer) {
-      engineRef.current.updatePlayerMovement(localPlayer.id, leftStick.x, leftStick.y, leftStick.y < -0.35);
-      engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + rightStick.x * 100, localPlayer.y + rightStick.y * 100);
+      const localPlayer = engineRef.current.getLocalPlayer();
+      const left = leftStickRef.current;
+      const right = rightStickRef.current;
 
-      if (rightStick.magnitude > 0.3) {
-        const bullets = engineRef.current.shoot(localPlayer.id);
-        if (bullets && bullets.length > 0) {
-          audioRef.current.playWeaponSound(localPlayer.currentWeapon).catch(() => {
-            return;
-          });
+      if (localPlayer) {
+        engineRef.current.updatePlayerMovement(localPlayer.id, left.x, left.y, left.y < -0.35);
+        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + right.x * 100, localPlayer.y + right.y * 100);
+
+        if (right.magnitude > 0.3) {
+          const bullets = engineRef.current.shoot(localPlayer.id);
+          if (bullets && bullets.length > 0) {
+            audioRef.current.playWeaponSound(localPlayer.currentWeapon).catch(() => {
+              return;
+            });
+          }
         }
       }
-    }
 
-    engineRef.current.update(1 / 60);
-    renderDataRef.current = engineRef.current.getRenderData();
+      engineRef.current.update(1 / 60);
+      renderDataRef.current = engineRef.current.getRenderData();
 
-    const events = engineRef.current.drainKillEvents();
-    if (events.length > 0) {
-      events.forEach((event) => {
-        killFeedRef.current.addKill(
-          event.killerName,
-          event.killerTeam,
-          event.victimName,
-          event.victimTeam,
-          event.killType,
-          event.weapon,
-          true,
-        );
-      });
+      const events = engineRef.current.drainKillEvents();
+      if (events.length > 0) {
+        events.forEach((event) => {
+          killFeedRef.current.addKill(
+            event.killerName,
+            event.killerTeam,
+            event.victimName,
+            event.victimTeam,
+            event.killType,
+            event.weapon,
+            true,
+          );
+        });
+      }
+
+      killFeedRef.current.update();
       setKillFeedEntries([...killFeedRef.current.getEntries()]);
-    }
+    }, 16);
 
-    killFeedRef.current.update();
-    setKillFeedEntries([...killFeedRef.current.getEntries()]);
-    tick.value += 1;
-  });
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {

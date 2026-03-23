@@ -13,7 +13,6 @@ import {
 } from '@shopify/react-native-skia';
 import { useWindowDimensions, View, StyleSheet, Pressable, Text, Alert, BackHandler } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useDerivedValue, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { AbilityButton } from '../components/AbilityButton';
@@ -113,7 +112,7 @@ function weaponStyle(weapon: WeaponType): { radius: number; color: string } {
   return { radius: 5, color: '#FFFFFF' };
 }
 
-function MapLayer({ renderDataRef, tick }: { renderDataRef: MutableRefObject<RenderData | null>; tick: { value: number } }) {
+function MapLayer({ renderDataRef, waveOffset }: { renderDataRef: MutableRefObject<RenderData | null>; waveOffset: number }) {
   const rd = renderDataRef.current;
   if (!rd) return null;
 
@@ -139,8 +138,6 @@ function MapLayer({ renderDataRef, tick }: { renderDataRef: MutableRefObject<Ren
       </>
     );
   }
-
-  const waveOffset = tick.value * 3;
 
   const lavaPath = Skia.Path.Make();
   if (rd.map.type === MapType.LAVA) {
@@ -317,28 +314,8 @@ export default function GameScreen({ navigation, route }: Props) {
   const [leftStick, setLeftStick] = useState<JoystickState>(createIdleJoystickState());
   const [rightStick, setRightStick] = useState<JoystickState>(createIdleJoystickState());
   const [frameStamp, setFrameStamp] = useState(0);
-
-  const tick = useSharedValue(0);
-
-  const cameraX = useDerivedValue(() => {
-    tick.value;
-    const rd = renderDataRef.current;
-    if (!rd) return 0;
-    const local = rd.players.find((player) => player.isLocal);
-    if (!local) return 0;
-    const mapWidth = MAP_CONFIGS[rd.map.type].width;
-    return Math.max(0, Math.min(local.x - width / 2, mapWidth - width));
-  });
-
-  const cameraY = useDerivedValue(() => {
-    tick.value;
-    const rd = renderDataRef.current;
-    if (!rd) return 0;
-    const local = rd.players.find((player) => player.isLocal);
-    if (!local) return 0;
-    const mapHeight = MAP_CONFIGS[rd.map.type].height;
-    return Math.max(0, Math.min(local.y - height / 2, mapHeight - height));
-  });
+  const leftStickRef = useRef(leftStick);
+  const rightStickRef = useRef(rightStick);
 
   const handleLeft = useCallback((state: JoystickState) => {
     setLeftStick(state);
@@ -347,6 +324,14 @@ export default function GameScreen({ navigation, route }: Props) {
   const handleRight = useCallback((state: JoystickState) => {
     setRightStick(state);
   }, []);
+
+  useEffect(() => {
+    leftStickRef.current = leftStick;
+  }, [leftStick]);
+
+  useEffect(() => {
+    rightStickRef.current = rightStick;
+  }, [rightStick]);
 
   const handleAbility = useCallback(() => {
     const localPlayer = engineRef.current?.getLocalPlayer();
@@ -424,57 +409,77 @@ export default function GameScreen({ navigation, route }: Props) {
     });
   }, []);
 
-  useFrameCallback(() => {
-    if (!engineRef.current) return;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!engineRef.current) return;
 
-    const localPlayer = engineRef.current.getLocalPlayer();
-    if (localPlayer) {
-      engineRef.current.updatePlayerMovement(localPlayer.id, leftStick.x, leftStick.y, leftStick.y < -0.35);
-      engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + rightStick.x * 100, localPlayer.y + rightStick.y * 100);
+      const localPlayer = engineRef.current.getLocalPlayer();
+      const left = leftStickRef.current;
+      const right = rightStickRef.current;
 
-      if (rightStick.magnitude > 0.3) {
-        const bullets = engineRef.current.shoot(localPlayer.id);
-        if (bullets && bullets.length > 0) {
-          audioManager.playWeaponSound(localPlayer.currentWeapon).catch(() => {
-            return;
-          });
+      if (localPlayer) {
+        engineRef.current.updatePlayerMovement(localPlayer.id, left.x, left.y, left.y < -0.35);
+        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + right.x * 100, localPlayer.y + right.y * 100);
+
+        if (right.magnitude > 0.3) {
+          const bullets = engineRef.current.shoot(localPlayer.id);
+          if (bullets && bullets.length > 0) {
+            audioManager.playWeaponSound(localPlayer.currentWeapon).catch(() => {
+              return;
+            });
+          }
         }
       }
-    }
 
-    engineRef.current.update(1 / 60);
-    renderDataRef.current = engineRef.current.getRenderData();
+      engineRef.current.update(1 / 60);
+      renderDataRef.current = engineRef.current.getRenderData();
 
-    const events = engineRef.current.drainKillEvents();
-    if (events.length > 0) {
-      const localName = localPlayer?.name ?? 'Player';
-      events.forEach((event) => {
-        killFeedRef.current.addKill(
-          event.killerName,
-          event.killerTeam,
-          event.victimName,
-          event.victimTeam,
-          event.killType,
-          event.weapon,
-          event.killerName === localName || event.victimName === localName,
-        );
-      });
-      setKillFeedEntries([...killFeedRef.current.getEntries()]);
-    } else {
-      killFeedRef.current.update();
-      setKillFeedEntries([...killFeedRef.current.getEntries()]);
-    }
+      const events = engineRef.current.drainKillEvents();
+      if (events.length > 0) {
+        const localName = localPlayer?.name ?? 'Player';
+        events.forEach((event) => {
+          killFeedRef.current.addKill(
+            event.killerName,
+            event.killerTeam,
+            event.victimName,
+            event.victimTeam,
+            event.killType,
+            event.weapon,
+            event.killerName === localName || event.victimName === localName,
+          );
+        });
+        setKillFeedEntries([...killFeedRef.current.getEntries()]);
+      } else {
+        killFeedRef.current.update();
+        setKillFeedEntries([...killFeedRef.current.getEntries()]);
+      }
 
-    tick.value += 1;
-    setFrameStamp((prev) => (prev + 1) % 1000000);
-  });
+      setFrameStamp((prev) => (prev + 1) % 1000000);
+    }, 16);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const cameraTransform = useMemo(
-    () => [
-      { translateX: -cameraX.value },
-      { translateY: -cameraY.value },
-    ],
-    [cameraX.value, cameraY.value, frameStamp],
+    () => {
+      const rd = renderDataRef.current;
+      if (!rd) {
+        return [{ translateX: 0 }, { translateY: 0 }];
+      }
+
+      const local = rd.players.find((player) => player.isLocal);
+      if (!local) {
+        return [{ translateX: 0 }, { translateY: 0 }];
+      }
+
+      const mapWidth = MAP_CONFIGS[rd.map.type].width;
+      const mapHeight = MAP_CONFIGS[rd.map.type].height;
+      const cameraX = Math.max(0, Math.min(local.x - width / 2, mapWidth - width));
+      const cameraY = Math.max(0, Math.min(local.y - height / 2, mapHeight - height));
+
+      return [{ translateX: -cameraX }, { translateY: -cameraY }];
+    },
+    [frameStamp, width, height],
   );
 
   const abilityCooldownPct = renderDataRef.current?.abilityCooldownPct ?? 0;
@@ -483,7 +488,7 @@ export default function GameScreen({ navigation, route }: Props) {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Canvas style={{ width, height }}>
         <Group transform={cameraTransform}>
-          <MapLayer renderDataRef={renderDataRef} tick={tick} />
+          <MapLayer renderDataRef={renderDataRef} waveOffset={frameStamp * 3} />
           <BulletLayer renderDataRef={renderDataRef} />
           <PlayerLayer renderDataRef={renderDataRef} />
           <ParticleLayer renderDataRef={renderDataRef} />
