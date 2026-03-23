@@ -1,0 +1,23 @@
+{
+  "name": "ahemia",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Ahemia mobile game monorepo (Expo React Native Android)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "mobile:start": "npm --prefix apps/mobile run start",
+    "mobile:android": "npm --prefix apps/mobile run android",
+    "mobile:android:metro": "npm --prefix apps/mobile run android:metro",
+    "mobile:android:reverse": "npm --prefix apps/mobile run android:reverse",
+    "mobile:android:build:debug": "npm --prefix apps/mobile run android:build:debug",
+    "mobile:android:install:debug": "npm --prefix apps/mobile run android:install:debug",
+    "mobile:android:launch": "npm --prefix apps/mobile run android:launch",
+    "mobile:android:usb": "npm --prefix apps/mobile run android:usb",
+    "mobile:typecheck": "npm --prefix apps/mobile run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -5,6 +5,7 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
     "android:metro": "expo start --dev-client --port 8081",
     "android:reverse": "adb reverse tcp:8081 tcp:8081",
     "android:build:debug": "cd android && ./gradlew assembleDebug --no-daemon",
