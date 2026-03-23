@@ -20,7 +20,7 @@ const COLORS = {
 export default function SplashScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>HeroClash</Text>
+      <Text style={styles.title}>Ahemia</Text>
       <Text style={styles.subtitle}>choose your hero. fight for glory.</Text>
 
       <Pressable style={styles.startButton} onPress={() => navigation.navigate('ModeSelect')}>

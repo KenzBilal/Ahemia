@@ -204,7 +204,7 @@ export class MultiplayerServer {
       reliableEvents: new Map(),
     });
 
-    this.zeroconf.publishService('heroclash', 'tcp', 'local.', roomId, HOST_PORT, {
+    this.zeroconf.publishService('ahemia', 'tcp', 'local.', roomId, HOST_PORT, {
       version: '1',
       roomId,
     });

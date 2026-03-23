@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.heroclash'
+    namespace 'com.kenzbilal.ahemia'
     defaultConfig {
-        applicationId 'com.anonymous.heroclash'
+        applicationId 'com.kenzbilal.ahemia'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

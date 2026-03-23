@@ -141,7 +141,7 @@ export class NetworkClient {
       });
     });
 
-    this.zeroconf.scan('heroclash', 'tcp', 'local.');
+    this.zeroconf.scan('ahemia', 'tcp', 'local.');
   }
 
   stopScan(): void {

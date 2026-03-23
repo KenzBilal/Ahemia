@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "HeroClash",
-    "slug": "heroclash",
+    "name": "Ahemia",
+    "slug": "ahemia",
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
@@ -32,7 +32,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.heroclash"
+      "package": "com.kenzbilal.ahemia"
     },
     "web": {
       "favicon": "./assets/favicon.png"

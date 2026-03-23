@@ -1,4 +1,4 @@
-package com.anonymous.heroclash
+package com.kenzbilal.ahemia
 
 import android.os.Build
 import android.os.Bundle

@@ -1,4 +1,4 @@
-package com.anonymous.heroclash
+package com.kenzbilal.ahemia
 
 import android.app.Application
 import android.content.res.Configuration
