@@ -1,41 +1,60 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Animated } from 'react-native';
 import { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ModeSelect'>;
 
 const COLORS = {
-  bg: '#0a0a0a',
-  card: '#111827',
-  cardBorder: '#1f2937',
-  textPrimary: '#ffffff',
-  textMuted: '#6b7280',
-  accent: '#3b82f6',
-  accentAlt: '#10b981',
-  danger: '#ef4444',
-  btnText: '#ffffff',
+  bg: '#09090B',
+  surface: '#18181B',
+  border: '#27272A',
+  text: '#FAFAFA',
+  textMuted: '#A1A1AA',
+  primary: '#00E5FF',
+  danger: '#FF2A55',
+  disabled: '#3F3F46',
 };
 
 export default function ModeSelectScreen({ navigation }: Props) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 700, useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
   return (
     <View style={styles.container}>
-      <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backText}>Back</Text>
-      </Pressable>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.backBtnText}>{'< BACK'}</Text>
+        </TouchableOpacity>
+      </View>
 
-      <View style={styles.cardsRow}>
-        <Pressable style={[styles.modeCard, styles.multiplayerCard]} onPress={() => navigation.navigate('Multiplayer')}>
-          <Text style={[styles.icon, styles.multiplayerAccent]}>Wi-Fi</Text>
-          <Text style={[styles.cardTitle, styles.multiplayerAccent]}>Multiplayer</Text>
-          <Text style={styles.cardSubtitle}>Play with friends on local Wi-Fi</Text>
-        </Pressable>
+      <View style={styles.mainBody}>
+        <View style={styles.leftCol}>
+          <Text style={styles.title}>SELECT</Text>
+          <Text style={styles.title}>MODE</Text>
+          <Text style={styles.subtitle}>CHOOSE A GAME MODE.</Text>
+        </View>
 
-        <Pressable style={[styles.modeCard, styles.survivalCard]} onPress={() => navigation.navigate('SurvivalGame')}>
-          <Text style={[styles.icon, styles.survivalAccent]}>Solo</Text>
-          <Text style={[styles.cardTitle, styles.survivalAccent]}>Survival</Text>
-          <Text style={styles.cardSubtitle}>Solo free roam - test your skills</Text>
-        </Pressable>
+        <Animated.View style={[styles.rightCol, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+          <TouchableOpacity style={styles.primaryCard} onPress={() => navigation.navigate('Multiplayer')}>
+            <Text style={styles.primaryIndex}>01</Text>
+            <Text style={styles.primaryTitle}>LAN LOBBY</Text>
+            <Text style={styles.primarySub}>LOCAL WI-FI MULTIPLAYER.</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryCard} onPress={() => navigation.navigate('MapSelect', { mode: 'survival' })}>
+            <Text style={styles.secondaryIndex}>02</Text>
+            <Text style={styles.secondaryTitle}>SURVIVAL MODE</Text>
+            <Text style={styles.secondarySub}>OFFLINE PLAY.</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </View>
   );
@@ -45,68 +64,103 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: 48,
+    paddingVertical: 32,
   },
-  backButton: {
-    position: 'absolute',
-    top: 16,
-    left: 16,
-    paddingHorizontal: 14,
+  header: {
+    marginBottom: 28,
+  },
+  backBtn: {
+    alignSelf: 'flex-start',
     paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
-    zIndex: 10,
   },
-  backText: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '500',
+  backBtnText: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 4,
   },
-  cardsRow: {
+  mainBody: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: -12,
+    justifyContent: 'space-between',
   },
-  modeCard: {
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
+  leftCol: {
     flex: 1,
-    borderRadius: 16,
-    padding: 28,
-    marginHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingRight: 42,
   },
-  multiplayerCard: {},
-  survivalCard: {},
-  icon: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    fontWeight: '500',
-    marginBottom: 12,
+  title: {
+    fontSize: 56,
+    fontWeight: '300',
+    color: COLORS.text,
+    letterSpacing: 16,
+    marginLeft: 8,
   },
-  cardTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 28,
-    fontWeight: '500',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  cardSubtitle: {
+  subtitle: {
+    fontSize: 10,
+    fontWeight: '600',
     color: COLORS.textMuted,
-    fontSize: 14,
-    fontWeight: '400',
-    lineHeight: 20,
-    textAlign: 'center',
+    letterSpacing: 6,
+    marginTop: 16,
+    marginLeft: 8,
   },
-  multiplayerAccent: {
-    color: COLORS.accent,
+  rightCol: {
+    width: 430,
+    gap: 14,
   },
-  survivalAccent: {
-    color: COLORS.accentAlt,
+  primaryCard: {
+    height: 140,
+    padding: 22,
+    backgroundColor: COLORS.text,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: COLORS.text,
+    justifyContent: 'space-between',
+  },
+  secondaryCard: {
+    height: 140,
+    padding: 22,
+    backgroundColor: COLORS.surface,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    justifyContent: 'space-between',
+  },
+  primaryIndex: {
+    color: COLORS.bg,
+    fontSize: 12,
+    fontWeight: '300',
+    letterSpacing: 2,
+  },
+  primaryTitle: {
+    color: COLORS.bg,
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 6,
+  },
+  primarySub: {
+    color: 'rgba(9,9,11,0.65)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+  secondaryIndex: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '300',
+    letterSpacing: 2,
+  },
+  secondaryTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 6,
+  },
+  secondarySub: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2,
   },
 });

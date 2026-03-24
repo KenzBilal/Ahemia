@@ -1,31 +1,68 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, Animated, ActivityIndicator } from 'react-native';
 import { RootStackParamList } from '../types/navigation';
+import { useGameStore } from '../lib/gameStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Splash'>;
 
 const COLORS = {
-  bg: '#0a0a0a',
-  card: '#111827',
-  cardBorder: '#1f2937',
-  textPrimary: '#ffffff',
-  textMuted: '#6b7280',
-  accent: '#3b82f6',
-  accentAlt: '#10b981',
-  danger: '#ef4444',
-  btnText: '#ffffff',
+  bg: '#09090B',
+  surface: '#18181B',
+  border: '#27272A',
+  text: '#FAFAFA',
+  textMuted: '#A1A1AA',
+  primary: '#00E5FF',
+  danger: '#FF2A55',
+  disabled: '#3F3F46',
 };
 
 export default function SplashScreen({ navigation }: Props) {
+  const loadPersistedData = useGameStore((state) => state.loadPersistedData);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const translateYAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateYAnim, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    const initApp = async () => {
+      await loadPersistedData();
+      setTimeout(() => {
+        const playerName = useGameStore.getState().playerName;
+        if (!playerName || playerName.trim() === '') {
+          navigation.replace('AvatarSetup');
+        } else {
+          navigation.replace('Home');
+        }
+      }, 1200);
+    };
+
+    initApp();
+  }, [fadeAnim, translateYAnim, navigation, loadPersistedData]);
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Ahemia</Text>
-      <Text style={styles.subtitle}>choose your hero. fight for glory.</Text>
-
-      <Pressable style={styles.startButton} onPress={() => navigation.navigate('ModeSelect')}>
-        <Text style={styles.startButtonText}>START</Text>
-      </Pressable>
+      <Animated.View
+        style={[
+          styles.content,
+          { opacity: fadeAnim, transform: [{ translateY: translateYAnim }] },
+        ]}
+      >
+        <Text style={styles.title}>AHEMIA</Text>
+        <Text style={styles.subtitle}>LOADING GAME</Text>
+      </Animated.View>
+      <ActivityIndicator size="small" color={COLORS.textMuted} style={styles.loader} />
     </View>
   );
 }
@@ -36,35 +73,28 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+  },
+  content: {
+    alignItems: 'center',
   },
   title: {
-    color: COLORS.textPrimary,
-    fontSize: 66,
-    fontWeight: '500',
-    letterSpacing: 1,
+    color: COLORS.text,
+    fontSize: 40,
+    fontWeight: '300',
+    letterSpacing: 16,
+    marginLeft: 16,
   },
   subtitle: {
     color: COLORS.textMuted,
-    fontSize: 14,
-    fontWeight: '400',
-    marginTop: 8,
-    marginBottom: 30,
+    marginTop: 14,
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 4,
+    fontFamily: 'monospace',
   },
-  startButton: {
-    height: 54,
-    minWidth: 180,
-    borderRadius: 16,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  startButtonText: {
-    color: COLORS.btnText,
-    fontSize: 18,
-    fontWeight: '500',
-    letterSpacing: 0.8,
+  loader: {
+    position: 'absolute',
+    bottom: 56,
+    opacity: 0.45,
   },
 });

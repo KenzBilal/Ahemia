@@ -12,14 +12,6 @@ buildscript {
   }
 }
 
-ext {
-  buildToolsVersion = findProperty('android.buildToolsVersion') ?: '36.0.0'
-  minSdkVersion = Integer.parseInt(findProperty('android.minSdkVersion') ?: '24')
-  compileSdkVersion = Integer.parseInt(findProperty('android.compileSdkVersion') ?: '36')
-  targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '36')
-  ndkVersion = findProperty('android.ndkVersion') ?: '27.1.12297006'
-}
-
 allprojects {
   repositories {
     google()

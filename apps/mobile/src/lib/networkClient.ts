@@ -1,17 +1,26 @@
 import { Buffer } from 'buffer';
 import UdpSocket from 'react-native-udp';
 import Zeroconf from 'react-native-zeroconf';
-import { WeaponType, PlayerTeam } from '../shared/gameTypes';
+import { HeroType, WeaponType, PlayerTeam } from '../shared/gameTypes';
+import { useGameStore } from './gameStore';
+import { multiplayerServer } from '../server/multiplayer';
+
+const DEFAULT_HOST_PORT = 41234;
 
 export interface InputPacket {
   t: 'INPUT';
   pid: string;
   lx: number;
   ly: number;
-  ax: number;
-  ay: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  a: number;
   f: 0 | 1;
   j: 0 | 1;
+  th: 0 | 1;
+  me: 0 | 1;
   ab: 0 | 1;
   ts: number;
 }
@@ -19,8 +28,15 @@ export interface InputPacket {
 export interface EventPacket {
   t: 'EVENT';
   seq: number;
-  evt: 'KILL' | 'RESPAWN' | 'ABILITY' | 'GAME_START' | 'GAME_END';
+  evt: 'KILL' | 'RESPAWN' | 'ABILITY' | 'GAME_START' | 'GAME_END' | 'PLAYER_ASSIGNED' | 'LOBBY_STATE_UPDATE';
   data: Record<string, string | number | boolean | null>;
+}
+
+export interface JoinPacket {
+  t: 'JOIN';
+  roomId: string;
+  name: string;
+  heroId: HeroType;
 }
 
 export interface AckPacket {
@@ -40,12 +56,14 @@ export interface StatePacket {
     health: number;
     team: PlayerTeam;
     isAlive: boolean;
+    isThrusting: boolean;
+    isMeleeing: boolean;
   }>>;
   bullets: Array<{ id: string; x: number; y: number; vx: number; vy: number; w: WeaponType }>;
   flags?: Array<{ team: PlayerTeam; x: number; y: number; cb?: string }>;
 }
 
-export type NetworkPacket = InputPacket | EventPacket | AckPacket | StatePacket;
+export type NetworkPacket = InputPacket | EventPacket | AckPacket | StatePacket | JoinPacket;
 
 export interface DiscoveredGame {
   id: string;
@@ -84,9 +102,31 @@ export class NetworkClient {
 
       if (msg.t === 'EVENT') {
         this.rawSend({ t: 'ACK', seq: msg.seq });
+        if (msg.evt === 'LOBBY_STATE_UPDATE') {
+          const nextMap = typeof msg.data?.map === 'string' ? msg.data.map : undefined;
+          const nextTimeLimit = typeof msg.data?.timeLimit === 'number' ? msg.data.timeLimit : undefined;
+
+          useGameStore.getState().setLobbyState({
+            ...(nextMap ? { map: nextMap } : {}),
+            ...(typeof nextTimeLimit === 'number' ? { timeLimit: nextTimeLimit } : {}),
+          });
+        }
       }
 
       this.messageHandler?.(msg);
+    });
+  }
+
+  connectToLocalHost(port = DEFAULT_HOST_PORT): void {
+    this.connect('127.0.0.1', port);
+  }
+
+  sendJoin(roomId: string, name: string, heroId: HeroType): void {
+    this.rawSend({
+      t: 'JOIN',
+      roomId,
+      name,
+      heroId,
     });
   }
 
@@ -125,6 +165,15 @@ export class NetworkClient {
     });
 
     send();
+  }
+
+  broadcastLobbyState(state: Partial<{ map: string; timeLimit: number }>): void {
+    const store = useGameStore.getState();
+    if (!store.isHost || !store.roomId) {
+      return;
+    }
+
+    multiplayerServer.updateLobbyState(store.roomId, state);
   }
 
   onMessage(handler: (msg: NetworkPacket) => void): void {

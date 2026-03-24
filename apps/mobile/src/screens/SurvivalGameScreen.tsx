@@ -2,12 +2,8 @@ import React, { MutableRefObject, useCallback, useEffect, useMemo, useRef, useSt
 import {
   Canvas,
   Circle,
-  Fill,
   Group,
-  Line,
-  Path,
   Rect,
-  Skia,
   Text as SkiaText,
   matchFont,
 } from '@shopify/react-native-skia';
@@ -22,17 +18,18 @@ import {
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AbilityButton } from '../components/AbilityButton';
-import { GameHUD } from '../components/GameHUD';
-import { JoystickControl } from '../components/JoystickControl';
-import { KillFeedUI } from '../components/KillFeedUI';
+import { AbilityActionButton } from '../components/AbilityActionButton';
+import { PlayerHudOverlay } from '../components/PlayerHudOverlay';
+import { JoystickControl, JoystickOutputState } from '../components/JoystickControl';
+import { KillFeedOverlay } from '../components/KillFeedOverlay';
+import { MeleeButton } from '../components/MeleeButton';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { AudioManager } from '../lib/audioManager';
 import { GameEngine, RenderData } from '../lib/gameEngine';
 import { KillFeed, KillFeedEntry } from '../lib/killFeed';
-import { JoystickState, createIdleJoystickState } from '../lib/joystick';
 import { createSurvivalGameState } from '../lib/survivalMode';
 import { useGameStore } from '../lib/gameStore';
-import { HERO_CONFIGS, HeroType, MAP_CONFIGS, MapType, PlayerTeam, WeaponType } from '../shared/gameTypes';
+import { HERO_CONFIGS, HeroType, MAP_CONFIGS, WeaponType } from '../shared/gameTypes';
 import { RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SurvivalGame'>;
@@ -44,11 +41,28 @@ const playerFont = matchFont({
   fontWeight: '700',
 });
 
-function heroBadgeColor(hero: HeroType): string {
-  if (hero === HeroType.TITAN || hero === HeroType.RIFT) return '#FFD700';
-  if (hero === HeroType.BLAZE || hero === HeroType.VOLT) return '#C0392B';
-  if (hero === HeroType.AEGIS || hero === HeroType.ORACLE) return '#2980B9';
-  return '#C0392B';
+const COLORS = {
+  bg: '#09090B',
+  surface: '#18181B',
+  border: '#27272A',
+  text: '#FAFAFA',
+  textMuted: '#A1A1AA',
+  primary: '#00E5FF',
+  danger: '#FF2A55',
+  disabled: '#3F3F46',
+};
+
+const IDLE_JOYSTICK: JoystickOutputState = {
+  angle: 0,
+  magnitude: 0,
+  isFiring: false,
+};
+
+function joystickVector(state: JoystickOutputState): { x: number; y: number } {
+  return {
+    x: Math.cos(state.angle) * state.magnitude,
+    y: Math.sin(state.angle) * state.magnitude,
+  };
 }
 
 function weaponStyle(weapon: WeaponType): { radius: number; color: string } {
@@ -65,68 +79,16 @@ function MapLayer({ renderDataRef }: { renderDataRef: MutableRefObject<RenderDat
 
   const mapCfg = MAP_CONFIGS[rd.map.type];
 
-  if (rd.map.type === MapType.SURVIVAL_TEST) {
-    return (
-      <>
-        <Fill color="#0d1117" />
-        <Rect x={0} y={rd.map.groundY} width={mapCfg.width} height={mapCfg.height - rd.map.groundY} color="#1e2530" />
-        {rd.map.platforms.map((platform, idx) => (
-          <Rect key={`platform-${idx}`} x={platform.x} y={platform.y} width={platform.width} height={platform.height} color="#2d3748" />
-        ))}
-        <Rect x={0} y={0} width={40} height={mapCfg.height} color="#1e2530" />
-        <Rect x={1560} y={0} width={40} height={mapCfg.height} color="#1e2530" />
-      </>
-    );
-  }
-
-  const waveOffset = 0;
-  const lavaPath = Skia.Path.Make();
-  if (rd.map.type === MapType.LAVA) {
-    lavaPath.moveTo(0, rd.map.groundY);
-    for (let x = 0; x <= mapCfg.width; x += 24) {
-      const y = rd.map.groundY + Math.sin((x + waveOffset) / 40) * 8;
-      lavaPath.lineTo(x, y);
-    }
-    lavaPath.lineTo(mapCfg.width, mapCfg.height);
-    lavaPath.lineTo(0, mapCfg.height);
-    lavaPath.close();
-  }
-
   return (
     <>
-      {rd.map.type === MapType.BASE && <Fill color="#87CEEB" />}
-      {rd.map.type === MapType.LAVA && <Fill color="#4a0e0e" />}
-      {rd.map.type === MapType.SPACE && <Fill color="#000000" />}
-
-      {rd.map.type === MapType.SPACE &&
-        Array.from({ length: 80 }, (_, i) => {
-          const x = (i * 73) % mapCfg.width;
-          const y = (i * 137) % rd.map.groundY;
-          return <Rect key={`star-${i}`} x={x} y={y} width={2} height={2} color="#FFFFFF" />;
-        })}
-
-      {rd.map.type === MapType.LAVA && <Path path={lavaPath} color="#FF6B00" />}
-
-      {rd.map.type !== MapType.LAVA && (
-        <Rect
-          x={0}
-          y={rd.map.groundY}
-          width={mapCfg.width}
-          height={mapCfg.height - rd.map.groundY}
-          color={rd.map.type === MapType.BASE ? '#2d5016' : '#555555'}
-        />
-      )}
-
-      {rd.map.platforms.map((platform, idx) => (
-        <Rect
-          key={`platform-${idx}`}
-          x={platform.x}
-          y={platform.y}
-          width={platform.width}
-          height={platform.height}
-          color={rd.map.type === MapType.BASE ? '#3a6b1f' : rd.map.type === MapType.LAVA ? '#8B0000' : '#555555'}
-        />
-      ))}
+      <Rect
+        x={0}
+        y={rd.map.groundY}
+        width={mapCfg.width}
+        height={Math.max(0, mapCfg.height - rd.map.groundY)}
+        color={COLORS.surface}
+      />
+      <Rect x={0} y={rd.map.groundY} width={mapCfg.width} height={2} color={COLORS.border} />
     </>
   );
 }
@@ -154,23 +116,32 @@ function PlayerLayer({ renderDataRef }: { renderDataRef: MutableRefObject<Render
       {rd.players.map((player) => {
         if (!player.isAlive) return null;
 
-        const baseColor = player.team === PlayerTeam.RED ? '#FF4444' : player.team === PlayerTeam.BLUE ? '#4444FF' : '#888888';
+        const aimAngle = player.angle || 0;
+        const lurchDistance = player.isMeleeing ? 12 : 0;
+        const lurchX = Math.cos(aimAngle) * lurchDistance;
+        const lurchY = Math.sin(aimAngle) * lurchDistance;
+
+        const facing = Math.cos(aimAngle) >= 0 ? 1 : -1;
         const healthW = 30 * (player.health / Math.max(1, player.maxHealth));
 
         return (
-          <Group key={player.id} transform={[{ translateX: player.x }, { translateY: player.y }]}>
-            <Rect x={-15} y={-20} width={30} height={40} color={baseColor} />
+          <Group key={player.id} transform={[{ translateX: player.x + lurchX }, { translateY: player.y + lurchY }]}> 
+            <PlayerAvatar
+              aimAngle={aimAngle}
+              facing={facing}
+              primaryColor={player.isLocal ? '#00E5FF' : '#FF2A55'}
+              skinColor="#FCDCB4"
+              isThrusting={player.isThrusting}
+            />
 
-            {player.isInvincible && <Rect x={-18} y={-23} width={36} height={46} color="rgba(255,255,0,0.35)" />}
-
-            <Line p1={{ x: 0, y: 0 }} p2={{ x: Math.cos(player.angle) * 22, y: Math.sin(player.angle) * 22 }} color="#000000" strokeWidth={2} />
+            {player.isMeleeing && <Rect x={32} y={-12} width={3} height={24} color="#FFFFFF" opacity={0.8} />}
 
             <Rect x={-15} y={-28} width={30} height={4} color="#FF0000" />
             <Rect x={-15} y={-28} width={healthW} height={4} color="#00FF00" />
 
             <SkiaText x={-15} y={-36} text={player.name} font={playerFont} color={player.isLocal ? '#FFFF00' : '#FFFFFF'} />
 
-            <Circle cx={11} cy={-14} r={6} color={heroBadgeColor(player.hero)} />
+            {player.isInvincible && <Rect x={-18} y={-23} width={36} height={46} color="rgba(255,255,0,0.25)" />}
           </Group>
         );
       })}
@@ -194,6 +165,7 @@ function ParticleLayer({ renderDataRef }: { renderDataRef: MutableRefObject<Rend
 export default function SurvivalGameScreen({ navigation }: Props) {
   const { width, height } = useWindowDimensions();
   const selectedHero = useGameStore((s) => s.selectedHero) ?? HeroType.TITAN;
+  const setLocalAimAngle = useGameStore((s) => s.setLocalAimAngle);
 
   const engineRef = useRef<GameEngine | null>(null);
   const renderDataRef = useRef<RenderData | null>(null);
@@ -201,11 +173,14 @@ export default function SurvivalGameScreen({ navigation }: Props) {
   const audioRef = useRef(new AudioManager());
 
   const [killFeedEntries, setKillFeedEntries] = useState<KillFeedEntry[]>([]);
-  const [leftStick, setLeftStick] = useState<JoystickState>(createIdleJoystickState());
-  const [rightStick, setRightStick] = useState<JoystickState>(createIdleJoystickState());
+  const [leftStick, setLeftStick] = useState<JoystickOutputState>(IDLE_JOYSTICK);
+  const [rightStick, setRightStick] = useState<JoystickOutputState>(IDLE_JOYSTICK);
+  const [isMeleeing, setIsMeleeing] = useState(false);
   const [exitDialogVisible, setExitDialogVisible] = useState(false);
   const leftStickRef = useRef(leftStick);
   const rightStickRef = useRef(rightStick);
+  const meleeRef = useRef(isMeleeing);
+  const meleeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const localPlayerId = 'local-player';
@@ -232,12 +207,23 @@ export default function SurvivalGameScreen({ navigation }: Props) {
     };
   }, [selectedHero]);
 
-  const handleLeft = useCallback((state: JoystickState) => {
+  const handleLeft = useCallback((state: JoystickOutputState) => {
     setLeftStick(state);
   }, []);
 
-  const handleRight = useCallback((state: JoystickState) => {
+  const handleRight = useCallback((state: JoystickOutputState) => {
     setRightStick(state);
+  }, []);
+
+  const handleMeleePress = useCallback(() => {
+    if (meleeResetTimerRef.current) {
+      clearTimeout(meleeResetTimerRef.current);
+    }
+    setIsMeleeing(true);
+    meleeResetTimerRef.current = setTimeout(() => {
+      setIsMeleeing(false);
+      meleeResetTimerRef.current = null;
+    }, 140);
   }, []);
 
   useEffect(() => {
@@ -247,6 +233,18 @@ export default function SurvivalGameScreen({ navigation }: Props) {
   useEffect(() => {
     rightStickRef.current = rightStick;
   }, [rightStick]);
+
+  useEffect(() => {
+    meleeRef.current = isMeleeing;
+  }, [isMeleeing]);
+
+  useEffect(() => {
+    return () => {
+      if (meleeResetTimerRef.current) {
+        clearTimeout(meleeResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleAbility = useCallback(() => {
     const localPlayer = engineRef.current?.getLocalPlayer();
@@ -266,12 +264,16 @@ export default function SurvivalGameScreen({ navigation }: Props) {
       const localPlayer = engineRef.current.getLocalPlayer();
       const left = leftStickRef.current;
       const right = rightStickRef.current;
+      const leftVec = joystickVector(left);
+      const rightVec = joystickVector(right);
 
       if (localPlayer) {
-        engineRef.current.updatePlayerMovement(localPlayer.id, left.x, left.y, left.y < -0.35);
-        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + right.x * 100, localPlayer.y + right.y * 100);
+        engineRef.current.updatePlayerMovement(localPlayer.id, leftVec.x, leftVec.y, leftVec.y < -0.35);
+        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + rightVec.x * 100, localPlayer.y + rightVec.y * 100);
+        engineRef.current.updatePlayerMelee(localPlayer.id, meleeRef.current);
+        setLocalAimAngle(right.magnitude > 0 ? right.angle : localPlayer.angle);
 
-        if (right.magnitude > 0.3) {
+        if (right.isFiring) {
           const bullets = engineRef.current.shoot(localPlayer.id);
           if (bullets && bullets.length > 0) {
             audioRef.current.playWeaponSound(localPlayer.currentWeapon).catch(() => {
@@ -315,7 +317,17 @@ export default function SurvivalGameScreen({ navigation }: Props) {
   }, []);
 
   const abilityCooldownPct = renderDataRef.current?.abilityCooldownPct ?? 0;
-  const cameraTransform = useMemo(() => [{ translateX: 0 }, { translateY: 0 }], []);
+  const cameraTransform = useMemo(() => {
+    const rd = renderDataRef.current;
+    const local = rd?.players.find((player) => player.isLocal);
+    if (!local) {
+      return [{ translateX: 0 }, { translateY: 0 }];
+    }
+
+    const cameraX = local.x - width / 2;
+    const cameraY = local.y - height / 2;
+    return [{ translateX: -cameraX }, { translateY: -cameraY }];
+  }, [height, killFeedEntries, width]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -329,26 +341,29 @@ export default function SurvivalGameScreen({ navigation }: Props) {
       </Canvas>
 
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-        <GameHUD renderDataRef={renderDataRef} />
-        <KillFeedUI entries={killFeedEntries} />
+        <PlayerHudOverlay renderDataRef={renderDataRef} />
+        <KillFeedOverlay entries={killFeedEntries} />
         <JoystickControl side="left" onStateChange={handleLeft} />
         <JoystickControl side="right" onStateChange={handleRight} />
-        <AbilityButton onPress={handleAbility} cooldownPct={abilityCooldownPct} />
+        <MeleeButton onPress={handleMeleePress} />
+        <View style={styles.actionDock} pointerEvents="box-none">
+          <AbilityActionButton onPress={handleAbility} cooldownPct={abilityCooldownPct} />
+        </View>
 
         <TouchableOpacity style={styles.exitBtn} onPress={() => setExitDialogVisible(true)}>
-          <Text style={styles.exitText}>X Exit</Text>
+          <Text style={styles.exitText}>SYSTEM.ABORT</Text>
         </TouchableOpacity>
 
         {exitDialogVisible && (
           <View style={styles.dialogOverlay}>
             <View style={styles.dialog}>
-              <Text style={styles.dialogTitle}>Exit Survival?</Text>
+              <Text style={styles.dialogTitle}>EXIT SURVIVAL?</Text>
               <View style={styles.dialogRow}>
                 <Pressable style={styles.dialogBtnCancel} onPress={() => setExitDialogVisible(false)}>
-                  <Text style={styles.dialogBtnText}>Keep Playing</Text>
+                  <Text style={styles.dialogBtnTextCancel}>KEEP PLAYING</Text>
                 </Pressable>
                 <Pressable style={styles.dialogBtnConfirm} onPress={handleExitConfirm}>
-                  <Text style={styles.dialogBtnText}>Exit</Text>
+                  <Text style={styles.dialogBtnText}>EXIT</Text>
                 </Pressable>
               </View>
             </View>
@@ -366,18 +381,28 @@ const styles = StyleSheet.create({
     left: 12,
     height: 36,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#4f5f70',
-    backgroundColor: 'rgba(8,16,28,0.85)',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,
   },
   exitText: {
-    color: '#e9f3ff',
-    fontSize: 13,
+    color: COLORS.textMuted,
+    fontSize: 10,
     fontWeight: '700',
+    letterSpacing: 3,
+    fontFamily: 'monospace',
+  },
+  actionDock: {
+    position: 'absolute',
+    right: 24,
+    bottom: 102,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
   },
   dialogOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -388,16 +413,17 @@ const styles = StyleSheet.create({
   },
   dialog: {
     width: 320,
-    borderRadius: 14,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#334b60',
-    backgroundColor: '#101a28',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
     padding: 14,
   },
   dialogTitle: {
-    color: '#eef6ff',
+    color: COLORS.text,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '300',
+    letterSpacing: 4,
     marginBottom: 12,
   },
   dialogRow: {
@@ -407,26 +433,35 @@ const styles = StyleSheet.create({
   dialogBtnCancel: {
     flex: 1,
     height: 42,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#3f556b',
-    backgroundColor: '#1a2738',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dialogBtnConfirm: {
     flex: 1,
     height: 42,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#6a3d46',
-    backgroundColor: '#452229',
+    borderColor: COLORS.text,
+    backgroundColor: COLORS.text,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dialogBtnText: {
-    color: '#f2f7ff',
-    fontSize: 14,
+    color: COLORS.bg,
+    fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: 'monospace',
+  },
+  dialogBtnTextCancel: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 2,
+    fontFamily: 'monospace',
   },
 });

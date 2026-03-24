@@ -2,12 +2,9 @@ import React, { MutableRefObject, useCallback, useEffect, useMemo, useRef, useSt
 import {
   Canvas,
   Circle,
-  Fill,
   Group,
   Line,
-  Path,
   Rect,
-  Skia,
   Text as SkiaText,
   matchFont,
 } from '@shopify/react-native-skia';
@@ -15,15 +12,17 @@ import { useWindowDimensions, View, StyleSheet, Pressable, Text, Alert, BackHand
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import { AbilityButton } from '../components/AbilityButton';
-import { GameHUD } from '../components/GameHUD';
-import { JoystickControl } from '../components/JoystickControl';
-import { KillFeedUI } from '../components/KillFeedUI';
+import { AbilityActionButton } from '../components/AbilityActionButton';
+import { PlayerHudOverlay } from '../components/PlayerHudOverlay';
+import { JoystickControl, JoystickOutputState } from '../components/JoystickControl';
+import { KillFeedOverlay } from '../components/KillFeedOverlay';
+import { MeleeButton } from '../components/MeleeButton';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { audioManager } from '../lib/audioManager';
 import { GameEngine, RenderData } from '../lib/gameEngine';
 import { KillFeed } from '../lib/killFeed';
-import { JoystickState, createIdleJoystickState } from '../lib/joystick';
-import { networkClient } from '../lib/networkClient';
+import { compressAxis, networkClient } from '../lib/networkClient';
+import { useGameStore } from '../lib/gameStore';
 import {
   DEFAULT_AMMO,
   GameMode,
@@ -49,11 +48,35 @@ const playerFont = matchFont({
   fontWeight: '700',
 });
 
-function createInitialState(): GameState {
+const COLORS = {
+  bg: '#09090B',
+  surface: '#18181B',
+  border: '#27272A',
+  text: '#FAFAFA',
+  textMuted: '#A1A1AA',
+  primary: '#00E5FF',
+  danger: '#FF2A55',
+  disabled: '#3F3F46',
+};
+
+const IDLE_JOYSTICK: JoystickOutputState = {
+  angle: 0,
+  magnitude: 0,
+  isFiring: false,
+};
+
+function joystickVector(state: JoystickOutputState): { x: number; y: number } {
+  return {
+    x: Math.cos(state.angle) * state.magnitude,
+    y: Math.sin(state.angle) * state.magnitude,
+  };
+}
+
+function createInitialState(localPlayerId: string): GameState {
   const hero = HERO_CONFIGS[HeroType.TITAN];
 
   const local: PlayerState = {
-    id: 'local',
+    id: localPlayerId,
     name: 'Player',
     team: PlayerTeam.RED,
     x: 420,
@@ -76,13 +99,15 @@ function createInitialState(): GameState {
     abilityCooldownUntil: 0,
     jetpackFuel: 100,
     isGrounded: false,
+    isThrusting: false,
+    isMeleeing: false,
   };
 
   return {
     gameId: 'local-match',
     settings: {
       mode: GameMode.DEATHMATCH,
-      map: MapType.BASE,
+      map: MapType.TEST_ZONE,
       maxPlayers: 6,
       timeLimit: 600,
       killLimit: 20,
@@ -97,13 +122,6 @@ function createInitialState(): GameState {
   };
 }
 
-function heroBadgeColor(hero: HeroType): string {
-  if (hero === HeroType.TITAN || hero === HeroType.RIFT) return '#FFD700';
-  if (hero === HeroType.BLAZE || hero === HeroType.VOLT) return '#C0392B';
-  if (hero === HeroType.AEGIS || hero === HeroType.ORACLE) return '#2980B9';
-  return '#C0392B';
-}
-
 function weaponStyle(weapon: WeaponType): { radius: number; color: string } {
   if (weapon === WeaponType.PISTOL) return { radius: 3, color: '#FFD700' };
   if (weapon === WeaponType.RIFLE) return { radius: 3, color: '#FF8C00' };
@@ -112,80 +130,22 @@ function weaponStyle(weapon: WeaponType): { radius: number; color: string } {
   return { radius: 5, color: '#FFFFFF' };
 }
 
-function MapLayer({ renderDataRef, waveOffset }: { renderDataRef: MutableRefObject<RenderData | null>; waveOffset: number }) {
+function MapLayer({ renderDataRef }: { renderDataRef: MutableRefObject<RenderData | null> }) {
   const rd = renderDataRef.current;
   if (!rd) return null;
 
   const mapCfg = MAP_CONFIGS[rd.map.type];
 
-  if (rd.map.type === MapType.SURVIVAL_TEST) {
-    return (
-      <>
-        <Fill color="#0d1117" />
-        <Rect x={0} y={rd.map.groundY} width={mapCfg.width} height={mapCfg.height - rd.map.groundY} color="#1e2530" />
-        {rd.map.platforms.map((platform, idx) => (
-          <Rect
-            key={`platform-${idx}`}
-            x={platform.x}
-            y={platform.y}
-            width={platform.width}
-            height={platform.height}
-            color="#2d3748"
-          />
-        ))}
-        <Rect x={0} y={0} width={40} height={mapCfg.height} color="#1e2530" />
-        <Rect x={1560} y={0} width={40} height={mapCfg.height} color="#1e2530" />
-      </>
-    );
-  }
-
-  const lavaPath = Skia.Path.Make();
-  if (rd.map.type === MapType.LAVA) {
-    lavaPath.moveTo(0, rd.map.groundY);
-    for (let x = 0; x <= mapCfg.width; x += 24) {
-      const y = rd.map.groundY + Math.sin((x + waveOffset) / 40) * 8;
-      lavaPath.lineTo(x, y);
-    }
-    lavaPath.lineTo(mapCfg.width, mapCfg.height);
-    lavaPath.lineTo(0, mapCfg.height);
-    lavaPath.close();
-  }
-
   return (
     <>
-      {rd.map.type === MapType.BASE && <Fill color="#87CEEB" />}
-      {rd.map.type === MapType.LAVA && <Fill color="#4a0e0e" />}
-      {rd.map.type === MapType.SPACE && <Fill color="#000000" />}
-
-      {rd.map.type === MapType.SPACE &&
-        Array.from({ length: 80 }, (_, i) => {
-          const x = (i * 73) % mapCfg.width;
-          const y = (i * 137) % rd.map.groundY;
-          return <Rect key={`star-${i}`} x={x} y={y} width={2} height={2} color="#FFFFFF" />;
-        })}
-
-      {rd.map.type === MapType.LAVA && <Path path={lavaPath} color="#FF6B00" />}
-
-      {rd.map.type !== MapType.LAVA && (
-        <Rect
-          x={0}
-          y={rd.map.groundY}
-          width={mapCfg.width}
-          height={mapCfg.height - rd.map.groundY}
-          color={rd.map.type === MapType.BASE ? '#2d5016' : '#555555'}
-        />
-      )}
-
-      {rd.map.platforms.map((platform, idx) => (
-        <Rect
-          key={`platform-${idx}`}
-          x={platform.x}
-          y={platform.y}
-          width={platform.width}
-          height={platform.height}
-          color={rd.map.type === MapType.BASE ? '#3a6b1f' : rd.map.type === MapType.LAVA ? '#8B0000' : '#555555'}
-        />
-      ))}
+      <Rect
+        x={0}
+        y={rd.map.groundY}
+        width={mapCfg.width}
+        height={Math.max(0, mapCfg.height - rd.map.groundY)}
+        color={COLORS.surface}
+      />
+      <Rect x={0} y={rd.map.groundY} width={mapCfg.width} height={2} color={COLORS.border} />
     </>
   );
 }
@@ -213,28 +173,25 @@ function PlayerLayer({ renderDataRef }: { renderDataRef: MutableRefObject<Render
       {rd.players.map((player) => {
         if (!player.isAlive) return null;
 
-        const baseColor = player.team === PlayerTeam.RED ? '#FF4444' : player.team === PlayerTeam.BLUE ? '#4444FF' : '#888888';
+        const aimAngle = player.angle || 0;
+        const lurchDistance = player.isMeleeing ? 12 : 0;
+        const lurchX = Math.cos(aimAngle) * lurchDistance;
+        const lurchY = Math.sin(aimAngle) * lurchDistance;
+
+        const facing = Math.cos(aimAngle) >= 0 ? 1 : -1;
         const healthW = 30 * (player.health / Math.max(1, player.maxHealth));
 
         return (
-          <Group key={player.id} transform={[{ translateX: player.x }, { translateY: player.y }]}>
-            <Rect x={-15} y={-20} width={30} height={40} color={baseColor} />
+          <Group key={player.id} transform={[{ translateX: player.x + lurchX }, { translateY: player.y + lurchY }]}> 
+            <PlayerAvatar
+              aimAngle={aimAngle}
+              facing={facing}
+              primaryColor={player.isLocal ? '#00E5FF' : '#FF2A55'}
+              skinColor="#FCDCB4"
+              isThrusting={player.isThrusting}
+            />
 
-            {player.isInvincible && <Rect x={-18} y={-23} width={36} height={46} color="rgba(255,255,0,0.35)" />}
-
-            <Line p1={{ x: 0, y: 0 }} p2={{ x: Math.cos(player.angle) * 22, y: Math.sin(player.angle) * 22 }} color="#000000" strokeWidth={2} />
-
-            {player.isDualWielding && (
-              <Line
-                p1={{ x: 0, y: 0 }}
-                p2={{
-                  x: Math.cos(player.angle + 10 * (Math.PI / 180)) * 22,
-                  y: Math.sin(player.angle + 10 * (Math.PI / 180)) * 22,
-                }}
-                color="#000000"
-                strokeWidth={2}
-              />
-            )}
+            {player.isMeleeing && <Rect x={32} y={-12} width={3} height={24} color="#FFFFFF" opacity={0.8} />}
 
             <Rect x={-15} y={-28} width={30} height={4} color="#FF0000" />
             <Rect x={-15} y={-28} width={healthW} height={4} color="#00FF00" />
@@ -247,7 +204,19 @@ function PlayerLayer({ renderDataRef }: { renderDataRef: MutableRefObject<Render
               color={player.isLocal ? '#FFFF00' : '#FFFFFF'}
             />
 
-            <Circle cx={11} cy={-14} r={6} color={heroBadgeColor(player.hero)} />
+            {player.isInvincible && <Rect x={-18} y={-23} width={36} height={46} color="rgba(255,255,0,0.25)" />}
+
+            {player.isDualWielding && (
+              <Line
+                p1={{ x: 0, y: 0 }}
+                p2={{
+                  x: Math.cos(aimAngle + 10 * (Math.PI / 180)) * 22,
+                  y: Math.sin(aimAngle + 10 * (Math.PI / 180)) * 22,
+                }}
+                color="#000000"
+                strokeWidth={2}
+              />
+            )}
           </Group>
         );
       })}
@@ -305,25 +274,67 @@ function FlagLayer({ renderDataRef }: { renderDataRef: MutableRefObject<RenderDa
 }
 
 export default function GameScreen({ navigation, route }: Props) {
-  const { width, height } = useWindowDimensions();
-  const engineRef = useRef<GameEngine | null>(new GameEngine(createInitialState(), 'local'));
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const storeLocalPlayerId = useGameStore((state) => state.localPlayerId);
+  const setStoreLocalPlayerId = useGameStore((state) => state.setLocalPlayerId);
+  const routeLocalPlayerId = route.name === 'Game' ? route.params?.localPlayerId : undefined;
+  const resolvedLocalPlayerId = routeLocalPlayerId ?? storeLocalPlayerId ?? 'local';
+  const engineRef = useRef<GameEngine | null>(new GameEngine(createInitialState(resolvedLocalPlayerId), resolvedLocalPlayerId));
   const renderDataRef = useRef<RenderData | null>(engineRef.current ? engineRef.current.getRenderData() : null);
   const killFeedRef = useRef(new KillFeed());
 
   const [killFeedEntries, setKillFeedEntries] = useState(killFeedRef.current.getEntries());
-  const [leftStick, setLeftStick] = useState<JoystickState>(createIdleJoystickState());
-  const [rightStick, setRightStick] = useState<JoystickState>(createIdleJoystickState());
+  const [leftStick, setLeftStick] = useState<JoystickOutputState>(IDLE_JOYSTICK);
+  const [rightStick, setRightStick] = useState<JoystickOutputState>(IDLE_JOYSTICK);
+  const [isMeleeing, setIsMeleeing] = useState(false);
   const [frameStamp, setFrameStamp] = useState(0);
+  const setLocalAimAngle = useGameStore((state) => state.setLocalAimAngle);
   const leftStickRef = useRef(leftStick);
   const rightStickRef = useRef(rightStick);
+  const meleeRef = useRef(isMeleeing);
+  const meleeResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleLeft = useCallback((state: JoystickState) => {
+  const handleLeft = useCallback((state: JoystickOutputState) => {
     setLeftStick(state);
   }, []);
 
-  const handleRight = useCallback((state: JoystickState) => {
+  const handleRight = useCallback((state: JoystickOutputState) => {
     setRightStick(state);
   }, []);
+
+  const handleMeleePress = useCallback(() => {
+    if (meleeResetTimerRef.current) {
+      clearTimeout(meleeResetTimerRef.current);
+    }
+    setIsMeleeing(true);
+    meleeResetTimerRef.current = setTimeout(() => {
+      setIsMeleeing(false);
+      meleeResetTimerRef.current = null;
+    }, 140);
+  }, []);
+
+  const { cameraTransform, mapBgColor } = useMemo(() => {
+    const rd = renderDataRef.current;
+    if (!rd) {
+      return {
+        cameraTransform: [{ translateX: 0 }, { translateY: 0 }],
+        mapBgColor: COLORS.bg,
+      };
+    }
+
+    const local = rd.players.find((player) => player.isLocal);
+    let cameraX = 0;
+    let cameraY = 0;
+    if (local) {
+      cameraX = local.x - screenWidth / 2;
+      cameraY = local.y - screenHeight / 2;
+    }
+
+    return {
+      cameraTransform: [{ translateX: -cameraX }, { translateY: -cameraY }],
+      mapBgColor: COLORS.bg,
+    };
+  }, [frameStamp, screenHeight, screenWidth]);
 
   useEffect(() => {
     leftStickRef.current = leftStick;
@@ -333,6 +344,18 @@ export default function GameScreen({ navigation, route }: Props) {
     rightStickRef.current = rightStick;
   }, [rightStick]);
 
+  useEffect(() => {
+    meleeRef.current = isMeleeing;
+  }, [isMeleeing]);
+
+  useEffect(() => {
+    return () => {
+      if (meleeResetTimerRef.current) {
+        clearTimeout(meleeResetTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleAbility = useCallback(() => {
     const localPlayer = engineRef.current?.getLocalPlayer();
     if (!engineRef.current || !localPlayer) return;
@@ -340,6 +363,12 @@ export default function GameScreen({ navigation, route }: Props) {
   }, []);
 
   const isSurvivalMode = route.name === 'SurvivalGame';
+
+  useEffect(() => {
+    if (!storeLocalPlayerId || storeLocalPlayerId !== resolvedLocalPlayerId) {
+      setStoreLocalPlayerId(resolvedLocalPlayerId);
+    }
+  }, [resolvedLocalPlayerId, setStoreLocalPlayerId, storeLocalPlayerId]);
 
   const leaveToModeSelect = useCallback(() => {
     networkClient.disconnect();
@@ -399,10 +428,39 @@ export default function GameScreen({ navigation, route }: Props) {
 
       Object.entries(msg.players ?? {}).forEach(([id, p]) => {
         if (id === localPlayer.id) return;
-        const target = state.players[id];
-        if (target) {
-          Object.assign(target, p as Partial<PlayerState>);
+        if (!state.players[id]) {
+          const fallbackHero = HeroType.TITAN;
+          const cfg = HERO_CONFIGS[fallbackHero];
+          state.players[id] = {
+            id,
+            name: `Player-${id.slice(0, 4)}`,
+            team: (p.team as PlayerTeam) ?? PlayerTeam.BLUE,
+            x: p.x ?? 0,
+            y: p.y ?? 0,
+            vx: p.vx ?? 0,
+            vy: p.vy ?? 0,
+            angle: p.angle ?? 0,
+            health: p.health ?? cfg.maxHealth,
+            maxHealth: cfg.maxHealth,
+            armor: cfg.armor,
+            speedMultiplier: cfg.moveSpeed,
+            heroId: fallbackHero,
+            hero: fallbackHero,
+            ammo: { ...DEFAULT_AMMO },
+            currentWeapon: WeaponType.RIFLE,
+            kills: 0,
+            deaths: 0,
+            isAlive: p.isAlive ?? true,
+            isInvincible: false,
+            abilityCooldownUntil: 0,
+            jetpackFuel: 100,
+            isGrounded: false,
+            isThrusting: false,
+            isMeleeing: false,
+          };
         }
+
+        Object.assign(state.players[id], p as Partial<PlayerState>);
       });
 
       engineRef.current.updateGameState(state);
@@ -410,18 +468,50 @@ export default function GameScreen({ navigation, route }: Props) {
   }, []);
 
   useEffect(() => {
+    networkClient.startInputLoop(() => {
+      const local = engineRef.current?.getLocalPlayer();
+      const left = leftStickRef.current;
+      const right = rightStickRef.current;
+      const leftVec = joystickVector(left);
+      const fuel = renderDataRef.current?.jetpackFuel ?? 0;
+      const jumpHeld = leftVec.y < -0.35;
+      const thrusting = jumpHeld && fuel > 0;
+
+      return {
+        t: 'INPUT',
+        pid: local?.id ?? 'local',
+        lx: compressAxis(leftVec.x, 2),
+        ly: compressAxis(leftVec.y, 2),
+        x: compressAxis(local?.x ?? 0, 2),
+        y: compressAxis(local?.y ?? 0, 2),
+        vx: compressAxis(local?.vx ?? 0, 2),
+        vy: compressAxis(local?.vy ?? 0, 2),
+        a: compressAxis(right.magnitude > 0 ? right.angle : (local?.angle ?? 0), 3),
+        f: right.isFiring ? 1 : 0,
+        j: jumpHeld ? 1 : 0,
+        th: thrusting ? 1 : 0,
+        me: meleeRef.current ? 1 : 0,
+        ab: 0,
+        ts: Date.now(),
+      };
+    });
+
     const interval = setInterval(() => {
       if (!engineRef.current) return;
 
       const localPlayer = engineRef.current.getLocalPlayer();
       const left = leftStickRef.current;
       const right = rightStickRef.current;
+      const leftVec = joystickVector(left);
+      const rightVec = joystickVector(right);
 
       if (localPlayer) {
-        engineRef.current.updatePlayerMovement(localPlayer.id, left.x, left.y, left.y < -0.35);
-        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + right.x * 100, localPlayer.y + right.y * 100);
+        engineRef.current.updatePlayerMovement(localPlayer.id, leftVec.x, leftVec.y, leftVec.y < -0.35);
+        engineRef.current.updatePlayerAim(localPlayer.id, localPlayer.x + rightVec.x * 100, localPlayer.y + rightVec.y * 100);
+        engineRef.current.updatePlayerMelee(localPlayer.id, meleeRef.current);
+        setLocalAimAngle(right.magnitude > 0 ? right.angle : localPlayer.angle);
 
-        if (right.magnitude > 0.3) {
+        if (right.isFiring) {
           const bullets = engineRef.current.shoot(localPlayer.id);
           if (bullets && bullets.length > 0) {
             audioManager.playWeaponSound(localPlayer.currentWeapon).catch(() => {
@@ -457,38 +547,19 @@ export default function GameScreen({ navigation, route }: Props) {
       setFrameStamp((prev) => (prev + 1) % 1000000);
     }, 16);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      networkClient.stopInputLoop();
+    };
   }, []);
-
-  const cameraTransform = useMemo(
-    () => {
-      const rd = renderDataRef.current;
-      if (!rd) {
-        return [{ translateX: 0 }, { translateY: 0 }];
-      }
-
-      const local = rd.players.find((player) => player.isLocal);
-      if (!local) {
-        return [{ translateX: 0 }, { translateY: 0 }];
-      }
-
-      const mapWidth = MAP_CONFIGS[rd.map.type].width;
-      const mapHeight = MAP_CONFIGS[rd.map.type].height;
-      const cameraX = Math.max(0, Math.min(local.x - width / 2, mapWidth - width));
-      const cameraY = Math.max(0, Math.min(local.y - height / 2, mapHeight - height));
-
-      return [{ translateX: -cameraX }, { translateY: -cameraY }];
-    },
-    [frameStamp, width, height],
-  );
-
   const abilityCooldownPct = renderDataRef.current?.abilityCooldownPct ?? 0;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <Canvas style={{ width, height }}>
+      <Canvas style={{ width: screenWidth, height: screenHeight }}>
+        <Rect x={0} y={0} width={screenWidth} height={screenHeight} color={mapBgColor} />
         <Group transform={cameraTransform}>
-          <MapLayer renderDataRef={renderDataRef} waveOffset={frameStamp * 3} />
+          <MapLayer renderDataRef={renderDataRef} />
           <BulletLayer renderDataRef={renderDataRef} />
           <PlayerLayer renderDataRef={renderDataRef} />
           <ParticleLayer renderDataRef={renderDataRef} />
@@ -499,14 +570,17 @@ export default function GameScreen({ navigation, route }: Props) {
       <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
         <View style={styles.topBar} pointerEvents="box-none">
           <Pressable style={styles.exitButton} onPress={handleExitMatch}>
-            <Text style={styles.exitButtonText}>Exit Match</Text>
+            <Text style={styles.exitButtonText}>SYSTEM.ABORT</Text>
           </Pressable>
         </View>
-        <GameHUD renderDataRef={renderDataRef} />
-        <KillFeedUI entries={killFeedEntries} />
+        <PlayerHudOverlay renderDataRef={renderDataRef} />
+        <KillFeedOverlay entries={killFeedEntries} />
         <JoystickControl side="left" onStateChange={handleLeft} />
         <JoystickControl side="right" onStateChange={handleRight} />
-        <AbilityButton cooldownPct={abilityCooldownPct} onPress={handleAbility} />
+        <MeleeButton onPress={handleMeleePress} />
+        <View style={styles.actionDock} pointerEvents="box-none">
+          <AbilityActionButton cooldownPct={abilityCooldownPct} onPress={handleAbility} />
+        </View>
       </View>
     </GestureHandlerRootView>
   );
@@ -522,16 +596,26 @@ const styles = StyleSheet.create({
   exitButton: {
     height: 36,
     paddingHorizontal: 14,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#4f5f70',
-    backgroundColor: 'rgba(8,16,28,0.85)',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   exitButtonText: {
-    color: '#e9f3ff',
-    fontSize: 13,
+    color: COLORS.textMuted,
+    fontSize: 10,
     fontWeight: '700',
+    letterSpacing: 3,
+    fontFamily: 'monospace',
+  },
+  actionDock: {
+    position: 'absolute',
+    right: 24,
+    bottom: 102,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
   },
 });

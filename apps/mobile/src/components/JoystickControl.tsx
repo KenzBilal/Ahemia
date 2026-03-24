@@ -1,52 +1,114 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
-import { clampJoystick, createIdleJoystickState, JoystickState, stateToKnobOffset } from '../lib/joystick';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+
+const COLORS = {
+  bg: '#09090B',
+  surface: '#18181B',
+  border: '#27272A',
+  text: '#FAFAFA',
+  textMuted: '#A1A1AA',
+  primary: '#00E5FF',
+  danger: '#FF2A55',
+  disabled: '#3F3F46',
+};
+
+const MAX_RADIUS = 60;
+const FIRE_THRESHOLD = 0.6;
+const JOYSTICK_SIZE = MAX_RADIUS * 2;
+const CENTER = JOYSTICK_SIZE / 2;
+const KNOB_SIZE = 20;
+const JS_EMIT_DELTA = 0.02;
 
 interface JoystickControlProps {
   side: 'left' | 'right';
-  onStateChange: (state: JoystickState) => void;
+  onStateChange: (state: { angle: number; magnitude: number; isFiring: boolean }) => void;
 }
 
-const RADIUS = 56;
+export interface JoystickOutputState {
+  angle: number;
+  magnitude: number;
+  isFiring: boolean;
+}
 
 export const JoystickControl = React.memo(function JoystickControl({ side, onStateChange }: JoystickControlProps) {
-  const [state, setState] = useState(createIdleJoystickState());
-  const { width, height } = useWindowDimensions();
+  const knobX = useSharedValue(0);
+  const knobY = useSharedValue(0);
+  const isFiringSV = useSharedValue(false);
+  const lastSentAngle = useSharedValue(0);
+  const lastSentMagnitude = useSharedValue(0);
+  const lastSentFire = useSharedValue(false);
 
-  const applyState = (next: JoystickState) => {
-    setState(next);
-    onStateChange(next);
+  const emitState = (angle: number, magnitude: number, isFiring: boolean, force = false) => {
+    'worklet';
+
+    const da = Math.abs(angle - lastSentAngle.value);
+    const dm = Math.abs(magnitude - lastSentMagnitude.value);
+    const df = isFiring !== lastSentFire.value;
+    if (force || da > JS_EMIT_DELTA || dm > JS_EMIT_DELTA || df) {
+      lastSentAngle.value = angle;
+      lastSentMagnitude.value = magnitude;
+      lastSentFire.value = isFiring;
+      runOnJS(onStateChange)({ angle, magnitude, isFiring });
+    }
   };
 
-  const applyTouchAt = (x: number, y: number) => {
-    const anchorX = side === 'left' ? 96 : width - 96;
-    const anchorY = height - 96;
-    const next = clampJoystick({ dx: x - anchorX, dy: y - anchorY }, RADIUS);
-    applyState(next);
-  };
+  const applyTouchAt = (touchX: number, touchY: number, force = false) => {
+    'worklet';
 
-  const applyIdle = () => {
-    applyState(createIdleJoystickState());
+    const rawDx = touchX - CENTER;
+    const rawDy = touchY - CENTER;
+    const rawDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+    const clampedDist = Math.min(rawDist, MAX_RADIUS);
+    const angle = rawDist > 0 ? Math.atan2(rawDy, rawDx) : 0;
+    const magnitude = rawDist > 0 ? clampedDist / MAX_RADIUS : 0;
+    const clampedX = Math.cos(angle) * clampedDist;
+    const clampedY = Math.sin(angle) * clampedDist;
+    const isFiring = side === 'right' && magnitude >= FIRE_THRESHOLD;
+
+    knobX.value = clampedX;
+    knobY.value = clampedY;
+    isFiringSV.value = isFiring;
+    emitState(angle, magnitude, isFiring, force);
   };
 
   const gesture = useMemo(
     () =>
       Gesture.Pan()
         .onBegin(({ x, y }) => {
-          runOnJS(applyTouchAt)(x, y);
+          applyTouchAt(x, y, true);
         })
         .onUpdate(({ x, y }) => {
-          runOnJS(applyTouchAt)(x, y);
+          applyTouchAt(x, y);
         })
         .onEnd(() => {
-          runOnJS(applyIdle)();
+          knobX.value = 0;
+          knobY.value = 0;
+          isFiringSV.value = false;
+          emitState(0, 0, false, true);
+        })
+        .onFinalize(() => {
+          knobX.value = 0;
+          knobY.value = 0;
+          isFiringSV.value = false;
+          emitState(0, 0, false, true);
         }),
-    [applyIdle, applyTouchAt],
+    [onStateChange, side],
   );
 
-  const knob = stateToKnobOffset(state, RADIUS);
+  const knobStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: knobX.value }, { translateY: knobY.value }],
+    backgroundColor:
+      side === 'left'
+        ? COLORS.textMuted
+        : isFiringSV.value
+          ? COLORS.danger
+          : Math.abs(knobX.value) > 0 || Math.abs(knobY.value) > 0
+            ? COLORS.primary
+            : COLORS.textMuted,
+  }));
 
   return (
     <View
@@ -54,14 +116,15 @@ export const JoystickControl = React.memo(function JoystickControl({ side, onSta
       style={[
         styles.container,
         {
-          left: side === 'left' ? 40 : undefined,
-          right: side === 'right' ? 40 : undefined,
+          left: side === 'left' ? 24 : undefined,
+          right: side === 'right' ? 24 : undefined,
         },
       ]}
     >
       <GestureDetector gesture={gesture}>
         <View style={styles.outerRing}>
-          <View style={[styles.innerKnob, { transform: [{ translateX: knob.dx }, { translateY: knob.dy }] }]} />
+          <View style={styles.thresholdRing} />
+          <Animated.View style={[styles.innerKnob, knobStyle]} />
         </View>
       </GestureDetector>
     </View>
@@ -71,26 +134,37 @@ export const JoystickControl = React.memo(function JoystickControl({ side, onSta
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 20,
-    width: RADIUS * 2,
-    height: RADIUS * 2,
+    bottom: 24,
+    width: JOYSTICK_SIZE,
+    height: JOYSTICK_SIZE,
   },
   outerRing: {
-    width: RADIUS * 2,
-    height: RADIUS * 2,
-    borderRadius: RADIUS,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.35)',
-    backgroundColor: 'rgba(4, 10, 20, 0.35)',
+    width: JOYSTICK_SIZE,
+    height: JOYSTICK_SIZE,
+    borderRadius: JOYSTICK_SIZE / 2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: 'rgba(9, 9, 11, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  thresholdRing: {
+    position: 'absolute',
+    width: JOYSTICK_SIZE * FIRE_THRESHOLD,
+    height: JOYSTICK_SIZE * FIRE_THRESHOLD,
+    borderRadius: (JOYSTICK_SIZE * FIRE_THRESHOLD) / 2,
+    borderWidth: 1,
+    borderColor: 'rgba(161, 161, 170, 0.35)',
+    backgroundColor: 'transparent',
   },
   innerKnob: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(140,190,255,0.8)',
-    borderWidth: 2,
-    borderColor: '#dceeff',
+    width: KNOB_SIZE,
+    height: KNOB_SIZE,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -10,16 +10,20 @@ import {
   WeaponType,
 } from '../shared/gameTypes';
 
-export function createSurvivalGameState(localPlayerId: string, hero: HeroType): GameState {
+export function createSurvivalGameState(
+  localPlayerId: string,
+  hero: HeroType,
+  mapType: MapType = MapType.TEST_ZONE,
+): GameState {
   const heroCfg = HERO_CONFIGS[hero];
-  const mapCfg = MAP_CONFIGS[MapType.SURVIVAL_TEST];
+  const mapCfg = MAP_CONFIGS[mapType];
   const spawnPt = mapCfg.spawnPoints[0];
 
   return {
     gameId: nanoid(),
     settings: {
       mode: GameMode.SURVIVAL,
-      map: MapType.SURVIVAL_TEST,
+      map: mapType,
       maxPlayers: 1,
       timeLimit: 0,
       killLimit: 0,
@@ -57,6 +61,8 @@ export function createSurvivalGameState(localPlayerId: string, hero: HeroType): 
         abilityCooldownUntil: 0,
         jetpackFuel: 100,
         isGrounded: false,
+        isThrusting: false,
+        isMeleeing: false,
         isDualWielding: false,
         abilityLastUsed: 0,
         isAbilityActive: false,

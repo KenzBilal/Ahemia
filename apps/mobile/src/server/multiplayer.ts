@@ -29,12 +29,24 @@ interface InputPacket {
   pid: string;
   lx: number;
   ly: number;
-  ax: number;
-  ay: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  a: number;
   f: 0 | 1;
   j: 0 | 1;
+  th: 0 | 1;
+  me: 0 | 1;
   ab: 0 | 1;
   ts: number;
+}
+
+interface JoinPacket {
+  t: 'JOIN';
+  roomId: string;
+  name: string;
+  heroId: HeroType;
 }
 
 interface StatePacket {
@@ -48,7 +60,7 @@ interface StatePacket {
 interface EventPacket {
   t: 'EVENT';
   seq: number;
-  evt: 'KILL' | 'RESPAWN' | 'ABILITY' | 'GAME_START' | 'GAME_END';
+  evt: 'KILL' | 'RESPAWN' | 'ABILITY' | 'GAME_START' | 'GAME_END' | 'PLAYER_ASSIGNED' | 'LOBBY_STATE_UPDATE';
   data: Record<string, string | number | boolean | null>;
 }
 
@@ -57,7 +69,7 @@ interface AckPacket {
   seq: number;
 }
 
-type Packet = InputPacket | StatePacket | EventPacket | AckPacket;
+type Packet = InputPacket | JoinPacket | StatePacket | EventPacket | AckPacket;
 
 interface NetworkPlayerState {
   id: string;
@@ -71,6 +83,8 @@ interface NetworkPlayerState {
   team: PlayerTeam;
   weapon: WeaponType;
   isAlive: boolean;
+  isThrusting: boolean;
+  isMeleeing: boolean;
 }
 
 interface ClientInfo {
@@ -113,8 +127,14 @@ export class MultiplayerServer {
   private physicsLoop: ReturnType<typeof setInterval> | null = null;
   private stateLoop: ReturnType<typeof setInterval> | null = null;
   private seq = 1;
+  private started = false;
 
   start(): void {
+    if (this.started) {
+      return;
+    }
+
+    this.started = true;
     this.socket.bind(HOST_PORT);
 
     this.socket.on('message', (raw: Uint8Array, remote) => {
@@ -129,6 +149,11 @@ export class MultiplayerServer {
 
       if (packet.t === 'INPUT') {
         this.handleInputPacket(key, remote.address, remote.port, packet);
+        return;
+      }
+
+      if (packet.t === 'JOIN') {
+        this.handleJoinPacket(key, remote.address, remote.port, packet);
       }
     });
 
@@ -147,13 +172,13 @@ export class MultiplayerServer {
     }, 50);
   }
 
-  createRoom(hostName: string, hero: HeroType): { roomId: string; playerId: string } {
+  createRoom(hostName: string, hero: HeroType, mapType: MapType = MapType.TEST_ZONE): { roomId: string; playerId: string } {
     const roomId = nanoid(8);
     const playerId = nanoid(10);
 
     const settings: GameSettings = {
       mode: GameMode.DEATHMATCH,
-      map: MapType.BASE,
+      map: mapType,
       maxPlayers: 6,
       timeLimit: 600,
       killLimit: 20,
@@ -188,6 +213,8 @@ export class MultiplayerServer {
       abilityCooldownUntil: 0,
       jetpackFuel: 100,
       isGrounded: false,
+      isThrusting: false,
+      isMeleeing: false,
     };
 
     this.rooms.set(roomId, {
@@ -199,7 +226,7 @@ export class MultiplayerServer {
       bullets: [],
       pendingInputs: {},
       lastBroadcastState: {},
-      isRunning: true,
+      isRunning: false,
       startTime: Date.now(),
       reliableEvents: new Map(),
     });
@@ -215,6 +242,7 @@ export class MultiplayerServer {
   joinRoom(roomId: string, playerName: string, hero: HeroType, address: string, port: number): string | null {
     const room = this.rooms.get(roomId);
     if (!room) return null;
+    if (Object.keys(room.players).length >= room.settings.maxPlayers) return null;
 
     const playerId = nanoid(10);
     const spawn = MAP_CONFIGS[room.settings.map].spawnPoints[Object.keys(room.players).length % MAP_CONFIGS[room.settings.map].spawnPoints.length];
@@ -244,6 +272,8 @@ export class MultiplayerServer {
       abilityCooldownUntil: 0,
       jetpackFuel: 100,
       isGrounded: false,
+      isThrusting: false,
+      isMeleeing: false,
     };
 
     const clientId = `${address}:${port}`;
@@ -265,6 +295,93 @@ export class MultiplayerServer {
     room.pendingInputs[packet.pid] = packet;
   }
 
+  private handleJoinPacket(key: string, address: string, port: number, packet: JoinPacket): void {
+    const playerId = this.joinRoom(packet.roomId, packet.name, packet.heroId, address, port);
+    if (!playerId) {
+      this.sendEventTo(address, port, {
+        t: 'EVENT',
+        seq: this.seq++,
+        evt: 'GAME_END',
+        data: {
+          reason: 'game_full',
+        },
+      });
+      return;
+    }
+
+    this.sendEventTo(address, port, {
+      t: 'EVENT',
+      seq: this.seq++,
+      evt: 'PLAYER_ASSIGNED',
+      data: {
+        playerId,
+        roomId: packet.roomId,
+      },
+    });
+
+    const room = this.rooms.get(packet.roomId);
+    if (!room) {
+      return;
+    }
+
+    this.sendEventTo(address, port, {
+      t: 'EVENT',
+      seq: this.seq++,
+      evt: 'LOBBY_STATE_UPDATE',
+      data: {
+        map: room.settings.map,
+        timeLimit: Math.max(1, Math.round(room.settings.timeLimit / 60)),
+      },
+    });
+  }
+
+  updateLobbyState(roomId: string, state: Partial<{ map: string; timeLimit: number }>): void {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    if (typeof state.map === 'string' && state.map.length > 0) {
+      room.settings.map = state.map as MapType;
+    }
+
+    if (typeof state.timeLimit === 'number' && Number.isFinite(state.timeLimit)) {
+      const clampedMinutes = Math.max(1, Math.min(30, Math.round(state.timeLimit)));
+      room.settings.timeLimit = clampedMinutes * 60;
+    }
+
+    this.sendReliableEvent(room, {
+      t: 'EVENT',
+      seq: this.seq++,
+      evt: 'LOBBY_STATE_UPDATE',
+      data: {
+        map: room.settings.map,
+        timeLimit: Math.max(1, Math.round(room.settings.timeLimit / 60)),
+      },
+    });
+  }
+
+  startGame(roomId: string): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return false;
+    }
+
+    room.isRunning = true;
+    room.startTime = Date.now();
+
+    this.sendReliableEvent(room, {
+      t: 'EVENT',
+      seq: this.seq++,
+      evt: 'GAME_START',
+      data: {
+        roomId,
+      },
+    });
+
+    return true;
+  }
+
   private updateGameState(room: Room): void {
     const mapCfg = MAP_CONFIGS[room.settings.map];
 
@@ -273,38 +390,16 @@ export class MultiplayerServer {
 
       const input = room.pendingInputs[player.id];
       if (input) {
-        player.vx = input.lx * 10 * player.speedMultiplier;
-        if (input.j === 1) {
-          player.vy -= JETPACK_THRUST;
-        }
-        player.angle = Math.atan2(input.ay, input.ax);
-      }
-
-      player.vy += GRAVITY;
-      player.vx = clamp(player.vx, -12, 12);
-      player.vy = clamp(player.vy, -20, 15);
-
-      player.x += player.vx;
-      player.y += player.vy;
-      player.vx *= 0.85;
-
-      if (player.y + PLAYER_HEIGHT / 2 >= GROUND_Y) {
-        player.y = GROUND_Y - PLAYER_HEIGHT / 2;
-        player.vy = 0;
-        player.isGrounded = true;
-      }
-
-      for (const platform of mapCfg.platforms) {
-        const bottom = player.y + PLAYER_HEIGHT / 2;
-        const left = player.x - PLAYER_WIDTH / 2;
-        const right = player.x + PLAYER_WIDTH / 2;
-        const onPlatformX = right > platform.x && left < platform.x + platform.width;
-        const fallingOnto = bottom >= platform.y && bottom <= platform.y + 12 && player.vy >= 0;
-        if (onPlatformX && fallingOnto) {
-          player.y = platform.y - PLAYER_HEIGHT / 2;
-          player.vy = 0;
-          player.isGrounded = true;
-        }
+        player.x = input.x;
+        player.y = input.y;
+        player.vx = input.vx;
+        player.vy = input.vy;
+        player.angle = input.a;
+        player.isThrusting = input.th === 1;
+        player.isMeleeing = input.me === 1;
+      } else {
+        player.isThrusting = false;
+        player.isMeleeing = false;
       }
 
       player.x = clamp(player.x, PLAYER_WIDTH / 2, mapCfg.width - PLAYER_WIDTH / 2);
@@ -384,6 +479,8 @@ export class MultiplayerServer {
         team: player.team,
         weapon: player.currentWeapon,
         isAlive: player.isAlive,
+        isThrusting: player.isThrusting,
+        isMeleeing: player.isMeleeing,
       };
 
       if (!prev || this.hasPlayerDelta(prev, next)) {
@@ -396,6 +493,8 @@ export class MultiplayerServer {
           health: next.health,
           team: next.team,
           isAlive: next.isAlive,
+          isThrusting: next.isThrusting,
+          isMeleeing: next.isMeleeing,
         };
       }
 
@@ -470,6 +569,13 @@ export class MultiplayerServer {
     });
   }
 
+  private sendEventTo(address: string, port: number, packet: EventPacket): void {
+    const buf = Buffer.from(JSON.stringify(packet));
+    this.socket.send(buf, 0, buf.length, port, address, () => {
+      return;
+    });
+  }
+
   private findRoomByPlayer(playerId: string): Room | null {
     for (const room of this.rooms.values()) {
       if (room.players[playerId]) return room;
@@ -486,6 +592,8 @@ export class MultiplayerServer {
       || Math.abs(prev.angle - next.angle) > 0.01
       || Math.abs(prev.health - next.health) > 0.1
       || prev.isAlive !== next.isAlive
+      || prev.isThrusting !== next.isThrusting
+      || prev.isMeleeing !== next.isMeleeing
     );
   }
 
@@ -504,12 +612,15 @@ export class MultiplayerServer {
 
     this.zeroconf.stop();
     this.socket.close();
+    this.started = false;
   }
 }
 
+export const multiplayerServer = new MultiplayerServer();
+
 export const defaultSettings: GameSettings = {
   mode: GameMode.DEATHMATCH,
-  map: MapType.BASE,
+  map: MapType.TEST_ZONE,
   maxPlayers: 6,
   timeLimit: 600,
   killLimit: 20,

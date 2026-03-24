@@ -8,10 +8,7 @@ export enum GameMode {
 }
 
 export enum MapType {
-  BASE = 'base',
-  LAVA = 'lava',
-  SPACE = 'space',
-  SURVIVAL_TEST = 'survival_test',
+  TEST_ZONE = 'test_zone',
 }
 
 export enum WeaponType {
@@ -38,6 +35,25 @@ export enum HeroType {
   RIFT = 'rift',
   ORACLE = 'oracle',
 }
+
+export interface SkinConfig {
+  id: string;
+  displayName: string;
+  bodyColor: string;      // main body color for Skia rect rendering
+  accentColor: string;    // accent color (gun arm, helmet stripe etc)
+  isLocked: boolean;      // false = available now, true = coming soon
+}
+
+export const PLAYER_SKINS: SkinConfig[] = [
+  { id: 'default', displayName: 'Soldier',  bodyColor: '#4A90D9', accentColor: '#2C5F8A', isLocked: false },
+  { id: 'red',     displayName: 'Crimson',  bodyColor: '#D94A4A', accentColor: '#8A2C2C', isLocked: false },
+  { id: 'green',   displayName: 'Ranger',   bodyColor: '#4AD94A', accentColor: '#2C8A2C', isLocked: false },
+  { id: 'gold',    displayName: 'Elite',    bodyColor: '#D9A84A', accentColor: '#8A6A2C', isLocked: false },
+  { id: 'ghost',   displayName: 'Ghost',    bodyColor: '#C0C0C0', accentColor: '#808080', isLocked: false },
+  { id: 'dark',    displayName: 'Shadow',   bodyColor: '#2C2C3A', accentColor: '#4A4A6A', isLocked: false },
+  { id: 'neon',    displayName: 'Neon',     bodyColor: '#4AFFD4', accentColor: '#00A884', isLocked: true  },
+  { id: 'titan',   displayName: 'Titan',    bodyColor: '#8B4513', accentColor: '#5C2D0E', isLocked: true  },
+];
 
 export interface WeaponConfig {
   type: WeaponType;
@@ -69,6 +85,20 @@ export interface MapConfig {
     top: number;
     bottom: number;
   };
+}
+
+export interface MapMeta {
+  type: MapType;
+  displayName: string;
+  description: string;
+  size: 'small' | 'medium' | 'large';
+  recommendedPlayers: string;
+  accentColor: string;
+  backgroundColor: string;
+  platformColor: string;
+  groundColor: string;
+  tags: string[];
+  isLocked: boolean;
 }
 
 export interface HeroConfig {
@@ -310,6 +340,8 @@ export interface PlayerState {
   secondaryWeapon?: WeaponType;
   abilityLastUsed?: number;
   isAbilityActive?: boolean;
+  isThrusting: boolean;
+  isMeleeing: boolean;
   abilityEffect?: 'stunned' | 'rooted' | 'dashing';
   abilityEffectUntil?: number;
 }
@@ -378,77 +410,43 @@ export type NetMessage =
   | { type: 'START'; payload: { roomId: string } };
 
 export const MAP_CONFIGS: Record<MapType, MapConfig> = {
-  [MapType.BASE]: {
-    width: 1600,
-    height: 900,
+  [MapType.TEST_ZONE]: {
+    width: 4000,
+    height: 2000,
+    groundY: 1500,
     spawnPoints: [
-      { x: 200, y: 450 },
-      { x: 1400, y: 450 },
-      { x: 800, y: 200 },
-      { x: 800, y: 700 },
-      { x: 400, y: 200 },
-      { x: 1200, y: 700 },
+      { x: 1800, y: 1400 },
+      { x: 2000, y: 1400 },
+      { x: 2200, y: 1400 },
     ],
-    platforms: [
-      { x: 300, y: 600, width: 200, height: 30 },
-      { x: 700, y: 500, width: 200, height: 30 },
-      { x: 1100, y: 600, width: 200, height: 30 },
-    ],
-  },
-  [MapType.LAVA]: {
-    width: 1600,
-    height: 900,
-    spawnPoints: [
-      { x: 200, y: 200 },
-      { x: 1400, y: 200 },
-      { x: 200, y: 700 },
-      { x: 1400, y: 700 },
-      { x: 800, y: 100 },
-      { x: 800, y: 800 },
-    ],
-    platforms: [
-      { x: 180, y: 470, width: 220, height: 24 },
-      { x: 1180, y: 470, width: 220, height: 24 },
-      { x: 650, y: 360, width: 300, height: 24 },
-    ],
-  },
-  [MapType.SPACE]: {
-    width: 1600,
-    height: 900,
-    spawnPoints: [
-      { x: 200, y: 450 },
-      { x: 1400, y: 450 },
-      { x: 800, y: 200 },
-      { x: 800, y: 700 },
-      { x: 400, y: 300 },
-      { x: 1200, y: 600 },
-    ],
-    platforms: [
-      { x: 260, y: 560, width: 180, height: 20 },
-      { x: 680, y: 470, width: 240, height: 20 },
-      { x: 1160, y: 560, width: 180, height: 20 },
-    ],
-  },
-  [MapType.SURVIVAL_TEST]: {
-    width: 1600,
-    height: 900,
-    groundY: 750,
-    spawnPoints: [{ x: 800, y: 680 }],
-    platforms: [
-      { x: 200, y: 580, width: 220, height: 20 },
-      { x: 680, y: 480, width: 240, height: 20 },
-      { x: 1180, y: 580, width: 220, height: 20 },
-      { x: 400, y: 660, width: 160, height: 20 },
-      { x: 1040, y: 660, width: 160, height: 20 },
-    ],
-    bounds: {
-      left: 40,
-      right: 1560,
-      top: 20,
-      bottom: 750,
-    },
+    platforms: [],
   },
 };
+
+/**
+ * MAP REGISTRY - Add new maps here only.
+ * Steps to add a new map:
+ * 1. Add MapType enum value above
+ * 2. Add MAP_CONFIGS entry above
+ * 3. Add MapMeta entry to this array below
+ * 4. Add rendering case in GameScreen MapLayer
+ * That's it - MapSelectScreen picks it up automatically.
+ */
+export const MAP_META_LIST: MapMeta[] = [
+  {
+    type: MapType.TEST_ZONE,
+    displayName: 'PROVING GROUNDS',
+    description: 'FLAT TOPOGRAPHY. ZERO OBSTACLES. PURE COMBAT TESTING.',
+    size: 'large',
+    recommendedPlayers: '2-6',
+    accentColor: '#00E5FF',
+    backgroundColor: '#09090B',
+    platformColor: '#27272A',
+    groundColor: '#18181B',
+    tags: ['Flat', 'Test', 'Arena'],
+    isLocked: false,
+  },
+];
 
 export const DEFAULT_AMMO: Record<WeaponType, number> = {
   [WeaponType.PISTOL]: WEAPON_CONFIGS[WeaponType.PISTOL].ammoPerMag,

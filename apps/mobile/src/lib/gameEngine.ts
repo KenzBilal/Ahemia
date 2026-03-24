@@ -68,6 +68,8 @@ export interface RenderData {
     isAlive: boolean;
     isInvincible: boolean;
     isDualWielding: boolean;
+    isMeleeing: boolean;
+    isThrusting: boolean;
     isLocal: boolean;
   }>;
   bullets: Array<{
@@ -101,6 +103,8 @@ export class GameEngine {
   private readonly lastShotTime: Record<string, number> = {};
   private readonly invincibilityEnd: Record<string, number> = {};
   private readonly runtimeInput: Record<string, RuntimeInput> = {};
+  private readonly thrustingState: Record<string, boolean> = {};
+  private readonly meleeState: Record<string, boolean> = {};
   private readonly jetpackFuel: Record<string, number> = {};
   private particles: Particle[] = [];
   private particleHead = 0;
@@ -157,6 +161,17 @@ export class GameEngine {
     }
 
     player.angle = Math.atan2(aimY - player.y, aimX - player.x);
+  }
+
+  updatePlayerMelee(playerId: string, active: boolean): void {
+    const player = this.gameState.players[playerId];
+    if (!player) {
+      return;
+    }
+
+    this.ensurePlayerRuntime(player);
+    this.meleeState[playerId] = active;
+    player.isMeleeing = active;
   }
 
   shoot(playerId: string): Bullet[] | null {
@@ -423,13 +438,23 @@ export class GameEngine {
       player.vx = input.vx * speedMult;
       player.vy += GRAVITY;
 
-      if (input.jetpack && this.jetpackFuel[player.id] > 0) {
+      const isThrusting = input.jetpack && this.jetpackFuel[player.id] > 0;
+      this.thrustingState[player.id] = isThrusting;
+      player.isThrusting = isThrusting;
+      player.isMeleeing = Boolean(this.meleeState[player.id]);
+
+      if (isThrusting) {
         const drain = this.getArchetype(player.hero ?? player.heroId) === 'ironman'
           ? JETPACK_FUEL_DRAIN * 0.5
           : JETPACK_FUEL_DRAIN;
         player.vy -= JETPACK_THRUST;
         this.jetpackFuel[player.id] = Math.max(0, this.jetpackFuel[player.id] - drain);
         this.spawnJetpackParticles(player);
+      }
+
+      if (player.isMeleeing) {
+        player.x += Math.cos(player.angle) * 1.1;
+        player.y += Math.sin(player.angle) * 0.45;
       }
 
       player.vx = this.clamp(player.vx, -MAX_VX, MAX_VX);
@@ -477,26 +502,6 @@ export class GameEngine {
           player.x = bounds.right - PLAYER_WIDTH / 2;
           player.vx = 0;
         }
-      }
-
-      if (this.gameState.settings.map === MapType.LAVA && player.y + PLAYER_HEIGHT / 2 >= groundY) {
-        player.isAlive = false;
-        player.deaths += 1;
-        for (let i = 0; i < 20; i += 1) {
-          this.addParticle({
-            x: player.x,
-            y: player.y,
-            vx: (Math.random() - 0.5) * 6,
-            vy: -Math.random() * 6,
-            color: Math.random() > 0.5 ? '#FF4500' : '#FF8C00',
-            life: 1,
-            radius: Math.random() * 3 + 1,
-          });
-        }
-        this.respawnQueue.push({
-          playerId: player.id,
-          respawnAt: now + this.gameState.settings.respawnTime,
-        });
       }
 
       if (now > (this.invincibilityEnd[player.id] ?? 0)) {
@@ -695,6 +700,8 @@ export class GameEngine {
         isAlive: player.isAlive,
         isInvincible: player.isInvincible,
         isDualWielding: Boolean(player.isDualWielding && player.secondaryWeapon),
+        isMeleeing: Boolean(player.isMeleeing),
+        isThrusting: Boolean(this.thrustingState[player.id]),
         isLocal: player.id === this.localPlayerId,
       })),
       bullets: this.gameState.bullets.map((bullet) => ({
@@ -734,6 +741,18 @@ export class GameEngine {
 
     if (this.jetpackFuel[player.id] === undefined) {
       this.jetpackFuel[player.id] = player.jetpackFuel ?? JETPACK_FUEL_MAX;
+    }
+
+    if (this.thrustingState[player.id] === undefined) {
+      this.thrustingState[player.id] = false;
+    }
+
+    if (this.meleeState[player.id] === undefined) {
+      this.meleeState[player.id] = false;
+    }
+
+    if (player.isMeleeing === undefined) {
+      player.isMeleeing = false;
     }
 
     if (player.isGrounded === undefined) {
